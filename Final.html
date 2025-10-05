@@ -50,10 +50,10 @@
     .keycap{ background:#0f141d; border:1px solid #2a3448; border-radius:6px; padding:2px 6px; min-width:26px; text-align:center; font-weight:700; color:#d7dde8; box-shadow: inset 0 -1px 0 rgba(0,0,0,.5), 0 1px 0 rgba(255,255,255,.06); }
     .icon{ color:#d7dde8; opacity:.9; }
     /* Bottom expanding panel from pill */
-    .panel{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%) translateY(8px) scale(.98); width:56px; height:48px; border-radius:999px; background:color-mix(in srgb,var(--panel) 92%, transparent); box-shadow:0 20px 60px rgba(0,0,0,.45); opacity:0; pointer-events:none; transition: width .28s cubic-bezier(.2,.8,.2,1), height .28s cubic-bezier(.2,.8,.2,1), border-radius .28s, transform .28s, opacity .2s; z-index:9; }
-    .panel.open{ width:min(300px, 80vw); height:clamp(150px, 28vh, 220px); border-radius:16px; opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0) scale(1); }
-    .panel-inner{ display:flex; flex-direction:column; width:100%; height:100%; padding:6px 8px; }
-    .tabs{ display:flex; gap:16px; padding:6px 8px 10px; align-items:center; }
+    .panel{ position:fixed; top: 16px; right: 16px; left: auto; bottom: auto; transform: none; border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,.35); z-index: 20; width: min(320px, 90vw); height: auto; opacity: 1; pointer-events: auto; background: color-mix(in srgb, var(--panel) 92%, transparent); }
+    .panel.open{ width: min(320px, 90vw); height: auto; border-radius: 16px; opacity: 1; pointer-events: auto; transform: none; }
+    .panel-inner{ padding: 10px 10px 6px 10px; display:flex; flex-direction:column; width:100%; height:100%; }
+    .tabs{ display:flex; gap:16px; padding:6px 8px 10px; align-items:center; justify-content: flex-end; }
     .tab-btn{ background:transparent; border:none; padding:6px 2px; border-radius:0; color:var(--muted); cursor:pointer; font-weight:700; letter-spacing:.2px; position:relative; }
     .tab-btn.active{ color:var(--text); }
     .tab-btn::after{ content:""; position:absolute; left:0; right:0; bottom:-6px; height:2px; background:transparent; border-radius:2px; opacity:.0; transition:opacity .2s ease, transform .2s ease; transform:scaleX(.8); }
@@ -86,10 +86,10 @@
     .keycap{ background:#0f141d; border:1px solid #2a3448; border-radius:6px; padding:2px 6px; min-width:26px; text-align:center; font-weight:600; color:#d7dde8; }
     .icon{ color:#d7dde8; opacity:.9; }
     /* Bottom expanding panel from pill */
-    .panel{ position:fixed; left:50%; bottom:16px; transform:translateX(-50%) translateY(8px) scale(.98); width:56px; height:48px; border-radius:999px; background:color-mix(in srgb,var(--panel) 92%, transparent); box-shadow:0 20px 60px rgba(0,0,0,.45); opacity:0; pointer-events:none; transition: width .28s cubic-bezier(.2,.8,.2,1), height .28s cubic-bezier(.2,.8,.2,1), border-radius .28s, transform .28s, opacity .2s; z-index:9; }
-    .panel.open{ width:min(300px, 80vw); height:clamp(150px, 28vh, 220px); border-radius:16px; opacity:1; pointer-events:auto; transform:translateX(-50%) translateY(0) scale(1); }
-    .panel-inner{ display:flex; flex-direction:column; width:100%; height:100%; padding:6px 8px; }
-    .tabs{ display:flex; gap:16px; padding:6px 8px 10px; align-items:center; }
+    .panel{ position:fixed; top: 16px; right: 16px; left: auto; bottom: auto; transform: none; border-radius: 16px; box-shadow: 0 8px 30px rgba(0,0,0,.35); z-index: 20; width: min(320px, 90vw); height: auto; opacity: 1; pointer-events: auto; background: color-mix(in srgb, var(--panel) 92%, transparent); }
+    .panel.open{ width: min(320px, 90vw); height: auto; border-radius: 16px; opacity: 1; pointer-events: auto; transform: none; }
+    .panel-inner{ padding: 10px 10px 6px 10px; display:flex; flex-direction:column; width:100%; height:100%; }
+    .tabs{ display:flex; gap:16px; padding:6px 8px 10px; align-items:center; justify-content: flex-end; }
     .tab-btn{ background:transparent; border:none; padding:6px 2px; border-radius:0; color:var(--muted); cursor:pointer; font-weight:700; letter-spacing:.2px; position:relative; }
     .tab-btn.active{ color:var(--text); }
     .tab-btn::after{ content:""; position:absolute; left:0; right:0; bottom:-6px; height:2px; background:transparent; border-radius:2px; opacity:.0; transition:opacity .2s ease, transform .2s ease; transform:scaleX(.8); }
@@ -234,11 +234,11 @@
   scene.add(spotLight);
 
   // --- Ground & Grid ---
-  const ground = new THREE.Mesh(new THREE.PlaneGeometry(60,60), new THREE.MeshStandardMaterial({ color:0x6b7280, roughness:0.92 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(10,10), new THREE.MeshStandardMaterial({ color:0x6b7280, roughness:0.92 }));
   ground.rotation.x = -Math.PI/2;
   ground.receiveShadow = true;
   scene.add(ground);
-  const grid = new THREE.GridHelper(60, 60, 0x2b3342, 0x1a2230);
+  const grid = new THREE.GridHelper(10, 10, 0x2b3342, 0x1a2230);
   grid.position.y = 0.001;
   scene.add(grid);
 
@@ -250,7 +250,7 @@
     const box = new THREE.Box3().setFromObject(obj);
     const size = box.getSize(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = maxDim > 0 ? 1.6 / maxDim : 1.0; // fit to ~1.6m cube
+    const scale = maxDim > 0 ? 0.1 / maxDim : 1.0; // fit to ~10m cube
     obj.scale.setScalar(scale);
 
     const box2 = new THREE.Box3().setFromObject(obj);
