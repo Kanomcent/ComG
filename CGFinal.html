@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<head>
+  <meta charset="utf-8" />
+  <title> CGFinal </title>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      overflow: hidden;
+      width: 100%;
+      height: 100%;
+    }
+    canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+    /* UI Styles */
+    #cam-ui {
+  position: fixed;
+  right: 12px;
+  top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 9999;
+  background: rgba(0,0,0,0.35);
+  padding: 8px;
+  border-radius: 6px;
+  backdrop-filter: blur(4px);
+}
+#cam-ui button {
+  background: rgba(255,255,255,0.9);
+  border: none;
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+}
+#cam-ui button:hover { filter: brightness(0.95); }
+  </style>
+</head>
+<body>
+    <!-- core three.js -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/RGBELoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/OBJLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/geometries/TextGeometry.js"></script>
+    <script>
+const renderer = new THREE.WebGLRenderer();
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.outputEncoding = THREE.sRGBEncoding;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+// เปลี่ยน exposure ให้สว่างขึ้นเล็กน้อยสำหรับเช้าตรู่
+renderer.toneMappingExposure = 0.6;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+// สำรอง background กรณี HDR ไม่โหลดสำเร็จ
+// ตั้ง background / fog เป็นโทนเช้าตรู่ (สีฟ้าเข้มผสมอุ่นที่ขอบฟ้า)
+scene.background = new THREE.Color(0x0f2a3a);
+scene.fog = new THREE.FogExp2(0x112a3a, 0.012);
+
+// เพิ่มตัวช่วยแอนิเมชัน
+const clock = new THREE.Clock();
+const mixers = []; // เก็บ AnimationMixer ของวัตถุที่มีแอนิเมชัน
+let polarBear = null; // เก็บ reference ของหมีสำหรับเคลื่อนที่
+const penguins = [];  // เก็บ instance เพนกวินของฝูง
+
+
+// Camera
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+// เปลี่ยนเป็นมุมบนเฉียง (ยกสูงและถอยออกเล็กน้อย)
+camera.position.set(25, 50, 25);
+// ตั้ง target ให้ชี้กลางฉาก (สูงเล็กน้อย) แล้วอัพเดต controls
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 2, 0);
+controls.update();
+
+
+const material2 = new THREE.MeshStandardMaterial({ color: 0xA9A9A9, metalness: 0.9, roughness: 0.2 });
+const glassMaterial = new THREE.MeshPhysicalMaterial({color: 0xffffff,metalness: 0,roughness: 0,transmission: 1.0,
+  transparent: true,opacity: 1.0,ior: 1.5,thickness: 0.5,clearcoat: 1.0,clearcoatRoughness: 0 });
+
+
+  // โหลดโมเดลหลัก
+  const gltfLoader = new THREE.GLTFLoader();
+
+  // helper: เพิ่ม error/logging เพื่อดีบัก
+  const onError = (err) => { console.error('Load error:', err); };
+
+  gltfLoader.load("https://raw.githubusercontent.com/Kanomcent/ComG/main/low_poly_snow_island.glb",
+    function(gltf) {
+      const model = gltf.scene;
+      model.scale.set(5,5,5);
+      model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+      scene.add(model);
+      model.position.set(0, 0.45, 0)
+      model.rotation.y = Math.PI / 5.5;
+      console.log('loaded: low_poly_snow_island');
+    },
+    undefined,
+    onError
+  );
+
+  gltfLoader.load("https://raw.githubusercontent.com/Kanomcent/ComG/main/polar_bear.glb",
+    function(gltf) {
+      const model = gltf.scene;
+      model.scale.set(0.05, 0.05, 0.05);
+      model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+      scene.add(model);
+      model.position.set(30, -5.5, 50);
+      console.log('loaded: polar_bear');
+
+      // สร้าง mixer ถ้ามีแอนิเมชันในไฟล์ glb
+      if (gltf.animations && gltf.animations.length > 0) {
+        const mixer = new THREE.AnimationMixer(model);
+        // พยายามหาคลิปที่มีชื่อตามเดิน (walk) ถ้าไม่มีใช้ clip แรก
+        let clip = gltf.animations.find(a => /walk|Walk|WALK/.test(a.name)) || gltf.animations[0];
+        const action = mixer.clipAction(clip);
+        action.play();
+        mixers.push(mixer);
+        model.userData.mixer = mixer;
+        console.log('polar_bear: playing animation', clip.name);
+      } else {
+        console.log('polar_bear: no animations found in glb');
+      }
+
+      // เตรียมให้หมีเดินแบบเดินไป-กลับ
+      polarBear = model;
+      polarBear.userData.walkSpeed = 5; // เพิ่มเป็น 2 เท่าจากเดิม 0.6
+      polarBear.userData.walkDir = new THREE.Vector3(-1, 0, 0).normalize();
+
+      // ขอบเขตการเดิน (ปรับค่า min/max ตามฉาก)
+      polarBear.userData.minX = -20;
+      polarBear.userData.maxX = 20;
+
+      // ให้หมีหันหน้าไปตามทิศทางเริ่มต้น
+      polarBear.lookAt(polarBear.position.clone().add(polarBear.userData.walkDir));
+    },
+    undefined,
+    onError
+  );
+
+  gltfLoader.load("https://raw.githubusercontent.com/Kanomcent/ComG/main/penguin_2.0.glb",
+    function(gltf) {
+      // ใช้ model เป็นแม่แบบ แล้วสร้างฝูง (clones)
+      const template = gltf.scene;
+      template.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+      const animations = gltf.animations || [];
+
+      const flockSize = 6; // จำนวนเพนกวินในฝูง
+      const center = new THREE.Vector3(10, 0.65, -50); // จุดศูนย์กลางฝูง ปรับได้
+
+      // เลือก clip (พยายามหา walk ถ้ามี)
+      let clip = animations.find(a => /walk|Walk|WALK/.test(a.name)) || animations[0] || null;
+
+      for (let i = 0; i < flockSize; i++) {
+        // clone: สำหรับ i==0 ใช้ template ต้นฉบับ เพื่อหลีกเลี่ยงการโหลดซ้ำ
+        const peng = (i === 0) ? template : template.clone(true);
+        // ปรับ scale ถ้าจำเป็น
+        peng.scale.set(0.5, 0.5, 0.5);
+
+        // กำหนดพฤติกรรม flock (มุมเริ่ม, รัศมี, ความเร็วการเดิน, bob)
+        const angle = (Math.PI * 2 / flockSize) * i + (Math.random() * 0.5 - 0.3);
+        const radius = 3 * 4; // รัศมีวง
+        const speed = 0.3 * 0.8; // ความเร็วเชิงมุม
+        const bobAmp = 0.08 * 0.06;
+        const bobFreq = 1.5 * 1.5;
+
+        peng.userData.flockCenter = center.clone();
+        peng.userData.flockAngle = angle;
+        peng.userData.flockRadius = radius;
+        peng.userData.flockSpeed = speed;
+        peng.userData.bobAmp = bobAmp;
+        peng.userData.bobFreq = bobFreq;
+
+        // ตำแหน่งเริ่มต้น
+        peng.position.set(
+          center.x + Math.cos(angle) * radius,
+          center.y,
+          center.z + Math.sin(angle) * radius
+        );
+
+        // เก็บตำแหน่งก่อนหน้าเพื่อคำนวณการเคลื่อนที่แบบต่อเนื่อง
+        peng.userData.prevPos = peng.position.clone();
+        peng.userData.prevAngle = angle;
+
+        scene.add(peng);
+        penguins.push(peng);
+
+        // ถ้ามี animation ให้สร้าง mixer ต่อ instance
+        if (clip) {
+          const mixer = new THREE.AnimationMixer(peng);
+          const action = mixer.clipAction(clip);
+          action.play();
+          mixers.push(mixer);
+        }
+      }
+
+      console.log('loaded: penguin flock, count=', penguins.length);
+    },
+    undefined,
+    onError
+  );
+
+  gltfLoader.load("https://raw.githubusercontent.com/Kanomcent/ComG/main/medieval_fantasy_-_camp_fire_asset.glb", function(gltf) {
+    const model = gltf.scene;
+    model.scale.set(5.0, 5.0, 5.0);
+    model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+    scene.add(model);
+    model.position.set(10, 3, -50)
+
+    // เพิ่ม PointLight สีส้มที่ตำแหน่งกองไฟ
+    const campLight = new THREE.PointLight(0xff8c33, 35, 70, 3); // color, intensity, distance, decay
+    campLight.position.set(10, 5, -50); // วางเหนือกองไฟเล็กน้อย
+    campLight.castShadow = true;
+    campLight.shadow.mapSize.set(1024, 1024);
+    campLight.shadow.bias = -0.0005;
+    scene.add(campLight);
+
+    // ตัวช่วยแสดงตำแหน่งไฟ ขณะพัฒนา (ลบออกได้)
+    const campHelper = new THREE.PointLightHelper(campLight, 0.5);
+    scene.add(campHelper);
+  });
+
+// HDRI
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+
+new THREE.RGBELoader()
+  .setDataType(THREE.UnsignedByteType)
+  .load(
+    'https://raw.githubusercontent.com/Kanomcent/ComG/main/evening_road_01_puresky_1k.hdr',
+    (hdrTexture) => {
+      const envMap = pmremGenerator.fromEquirectangular(hdrTexture).texture;
+      scene.background = envMap;
+      scene.environment = envMap;
+      hdrTexture.dispose();
+      pmremGenerator.dispose();
+    },
+    undefined,
+    function(err){ console.error('HDR load error:', err); }
+  );
+
+
+gltfLoader.load("https://raw.githubusercontent.com/Kanomcent/ComG/main/not-too-modern_fridge.glb", function(gltf) {
+    const model = gltf.scene;
+    model.scale.set(0.1, 0.1, 0.1);
+    model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+    scene.add(model);
+    model.position.set(50, 2, 5)
+    model.rotation.y = 1.5;
+  });
+gltfLoader.load("https://raw.githubusercontent.com/Kanomcent/ComG/main/model/NAME.glb", function(gltf) {
+    const model = gltf.scene;
+    model.scale.set(5, 5, 5);
+    model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+    scene.add(model);
+    model.position.set(57, 9.5, 14)
+    model.rotation.y = 1.5;
+  });
+  const texLoader = new THREE.TextureLoader();
+// ใช้ raw.githubusercontent.com และตั้ง onLoad/onError, anisotropy และ encoding
+const faceTexture = texLoader.load(
+  "https://raw.githubusercontent.com/Kanomcent/ComG/main/athipat.jpg",
+  () => { console.log('face texture loaded'); },
+  undefined,
+  (err) => { console.error('face texture load error', err); }
+);
+faceTexture.anisotropy = renderer.capabilities.getMaxAnisotropy();
+faceTexture.encoding = THREE.sRGBEncoding;
+
+const faceMat = new THREE.MeshBasicMaterial({ map: faceTexture });
+const facePlane = new THREE.Mesh(
+  new THREE.PlaneGeometry(7, 7),
+  faceMat
+);
+facePlane.position.set(57, 17, 10.7);
+// ใช้ radians แทน degrees
+facePlane.rotation.y = 1.5;
+facePlane.receiveShadow = true;
+scene.add(facePlane);
+
+gltfLoader.load("https://raw.githubusercontent.com/Kanomcent/ComG/main/ice_bear_we_bare_bears.glb", function(gltf) {
+    const model = gltf.scene;
+    model.scale.set(5, 5, 5);
+    model.traverse(c => { if (c.isMesh) { c.castShadow = true; c.receiveShadow = true; }});
+    scene.add(model);
+    model.position.set(7, 18, 2)
+    model.rotation.y = 0.74;
+  });
+  // shader sphere (vertical wobble)
+	const shaderSphereGeo = new THREE.SphereGeometry(6, 32, 15);
+	const shaderSphereMat = new THREE.ShaderMaterial({
+		uniforms: {
+			uTime:  { value: 0.0 },
+			uAmp:   { value: 0.8 },
+			uColor: { value: new THREE.Color(0xFFFF00) }
+		},
+		vertexShader: `
+			uniform float uTime;
+			uniform float uAmp;
+			varying vec2 vUv;
+			void main() {
+				vUv = uv;
+				vec3 pos = position;
+				// simple vertical displacement using sin
+				pos.y += sin(uTime * 2.0 + position.x * 0.5 + position.z * 0.5) * uAmp;
+				gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+			}
+		`,
+		fragmentShader: `
+			uniform vec3 uColor;
+			varying vec2 vUv;
+			void main() {
+				float shade = 0.6 + 0.4 * vUv.y;
+				gl_FragColor = vec4(uColor * shade, 1.0);
+			}
+		`,
+		side: THREE.DoubleSide
+	});
+	// keep a global reference used in animate
+	window.shaderSphere = new THREE.Mesh(shaderSphereGeo, shaderSphereMat);
+	window.shaderSphere.position.set(0, 60, 25);
+	window.shaderSphere.castShadow = true;
+	window.shaderSphere.receiveShadow = true;
+	scene.add(window.shaderSphere);
+
+	// --- เพิ่ม: PointLight อยู่ภายในทรงกลม (ใช้เป็นลูกของ mesh) ---
+	// color, intensity, distance, decay
+	window.shaderSphereLight = new THREE.PointLight(0xfff9c4, 30, 400, 2);
+	window.shaderSphereLight.position.set(0, 0, 0); // relative to mesh center
+	window.shaderSphereLight.castShadow = false; // ปรับเป็น true ถ้าต้องการเงา
+	window.shaderSphere.add(window.shaderSphereLight);
+
+	// (ตัวช่วยแสดงตำแหน่งไฟ ขณะพัฒนา — ลบออกได้)
+	window.shaderSphereLightHelper = new THREE.PointLightHelper(window.shaderSphereLight, 1.2);
+	scene.add(window.shaderSphereLightHelper);
+
+
+
+// click
+
+  const clickable = [];
+            // --- Raycaster + คลิกเพื่อสลับมุม ---
+            const raycaster = new THREE.Raycaster();
+            const pointer = new THREE.Vector2();
+            let pickedObjPostion = new THREE.Vector3();
+
+            function setPointer(e) {
+                const r = renderer.domElement.getBoundingClientRect();
+                const x = (e.clientX ?? e.touches[0].clientX) - r.left;
+                const y = (e.clientY ?? e.touches[0].clientY) - r.top;
+                pointer.x = (x / r.width) * 2 - 1;
+                pointer.y = -(y / r.height) * 2 + 1;
+
+            }
+
+            function onPick(e) {
+                setPointer(e);
+                raycaster.setFromCamera(pointer, camera);
+                const hit = raycaster.intersectObjects(clickable, false)[0];
+                if (!hit) 
+                    return;
+                const view = VIEWS[hit.object.name];
+                pickedObjPostion = hit.object.position;
+                if (!view) return;
+
+                // ย้ายแบบทันที (ถ้าอยากนุ่ม ๆ ค่อยเสริม lerp ทีหลัง)
+                camera.position.copy(view.pos);
+                //controls.target.copy(view.tar);
+                controls.update();
+            }
+
+            renderer.domElement.addEventListener('click', onPick);
+            renderer.domElement.addEventListener('touchend', (e) => { onPick(e); }, { passive: true });
+
+            addEventListener('resize', () => {
+                camera.aspect = innerWidth / innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(innerWidth, innerHeight);
+            });
+            function lerp(a, b, t) {
+                return a + (b - a) * t;   // t ใน [0..1]
+            }
+
+function animate( time ) {
+  const delta = clock.getDelta();
+  const elapsed = clock.getElapsedTime();
+
+  // update shader time uniform (if present)
+  if (window.shaderSphere && window.shaderSphere.material && window.shaderSphere.material.uniforms) {
+    window.shaderSphere.material.uniforms.uTime.value = elapsed;
+  }
+
+  // --- เพิ่ม: ทำให้ไฟภายในพัลส์ (เล็กน้อย) ---
+  if (window.shaderSphereLight) {
+    window.shaderSphereLight.intensity = 1.2 + Math.sin(elapsed * 2.5) * 0.6;
+  }
+  if (window.shaderSphereLightHelper) {
+    window.shaderSphereLightHelper.update(); // keep helper synced
+  }
+
+  // อัพเดต mixer ทั้งหมด
+  for (let i = 0; i < mixers.length; i++) {
+    mixers[i].update(delta);
+  }
+
+  controls.update();
+
+  // ถ้ามี polarBear ให้เคลื่อนที่ตาม walkDir และความเร็ว และเดินกลับเมื่อถึงขอบ
+  if (polarBear) {
+    const speed = polarBear.userData.walkSpeed || 0;
+    const move = polarBear.userData.walkDir.clone().multiplyScalar(speed * delta);
+    polarBear.position.add(move);
+
+    // ตรวจสอบขอบเขตแกน X (เปลี่ยนเป็นแกนอื่นถ้าต้องการ)
+    const minX = polarBear.userData.minX;
+    const maxX = polarBear.userData.maxX;
+    if (minX !== undefined && maxX !== undefined) {
+      if (polarBear.position.x <= minX || polarBear.position.x >= maxX) {
+        // ปรับให้ไม่เลยขอบ
+        polarBear.position.x = THREE.MathUtils.clamp(polarBear.position.x, minX, maxX);
+        // กลับทิศ
+        polarBear.userData.walkDir.negate();
+        // หมุนโมเดล 180 องศาเพื่อหันหน้า (เรียบง่าย)
+        polarBear.rotateY(Math.PI);
+      }
+    }
+  }
+
+  // อัพเดตตำแหน่งเพนกวินเป็นฝูง (วงกลม + bob) — ปรับให้เคลื่อนที่ลื่นและหมุนแบบสมูท
+  if (penguins.length > 0) {
+    for (let i = 0; i < penguins.length; i++) {
+      const p = penguins[i];
+      const ud = p.userData;
+
+      // คำนวณมุมใหม่ (angular velocity)
+      const newAngle = ud.flockAngle + ud.flockSpeed * 0.6 * delta; // ปรับสเกลความเร็วถ้าต้องการ
+      ud.flockAngle = newAngle;
+
+      // ตำแหน่งเป้าหมายบนวง
+      const targetX = ud.flockCenter.x + Math.cos(newAngle) * ud.flockRadius;
+      const targetZ = ud.flockCenter.z + Math.sin(newAngle) * ud.flockRadius;
+      const targetY = ud.flockCenter.y + Math.sin(elapsed * ud.bobFreq + i) * ud.bobAmp;
+
+      const targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+
+      // เคลื่อนแบบลื่น (interpolate) แทนการ set ตรง ๆ เพื่อหลีกเลี่ยงกระโดด
+      const lerpT = Math.min(1, 6 * delta); // ค่าปรับความลื่น
+      p.position.lerp(targetPos, lerpT);
+
+      // หมุนให้หันตามทิศทางการเคลื่อนที่ด้วย slerp
+      const vel = targetPos.clone().sub(ud.prevPos);
+      if (vel.lengthSq() > 1e-6) {
+        const forward = vel.clone().setY(0).normalize();
+        const up = new THREE.Vector3(0, 1, 0);
+        const m = new THREE.Matrix4().lookAt(new THREE.Vector3(0,0,0), forward, up);
+        const targetQuat = new THREE.Quaternion().setFromRotationMatrix(m);
+        // สมูทการหมุน
+        p.quaternion.slerp(targetQuat, 0.2 + 0.6 * delta);
+      }
+
+      // อัพเดต prevPos สำหรับเฟรมถัดไป
+      ud.prevPos.copy(p.position);
+    }
+  }
+
+
+
+  // adaptive exposure/ambient (ถ้ามี) ...existing logic...
+  // ...existing code for adaptive exposure if present...
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(animate);
+}
+animate();
+
+  // --- เพิ่ม: camera presets และฟังก์ชันย้ายกล้องแบบนุ่ม ๆ ---
+  const CAMERA_PRESETS = {
+    BIGBEAR:  { pos: new THREE.Vector3(35,30,20), target: new THREE.Vector3(0,2,0) }, // ปรับให้เป็นมุมเฉียงบน
+    top:     { pos: new THREE.Vector3(50,70,50),    target: new THREE.Vector3(0,1.5,0) }, // มุมบนเฉียงเล็กน้อย
+    Polar:   { pos: new THREE.Vector3(10,10,90),    target: new THREE.Vector3(0,1,0) },
+    NAME:    { pos: new THREE.Vector3(70,15,13),    target: new THREE.Vector3(0,0,0) },
+    penguins:{ pos: new THREE.Vector3(12,15,-25),  target: new THREE.Vector3(10,1,-50) },
+  };
+
+  function moveCameraTo(endPos, endTarget, duration = 900) {
+    const startPos = camera.position.clone();
+    const startTarget = controls.target.clone();
+    const t0 = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - t0) / duration);
+      camera.position.lerpVectors(startPos, endPos, t);
+      controls.target.lerpVectors(startTarget, endTarget, t);
+      controls.update();
+      if (t < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  // UI buttons are after this script in the DOM — wait for DOMContentLoaded
+  window.addEventListener('DOMContentLoaded', () => {
+    const ui = document.getElementById('cam-ui');
+    if (!ui) return;
+    ui.querySelectorAll('button[data-preset]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const key = btn.dataset.preset;
+        const p = CAMERA_PRESETS[key];
+        if (p) moveCameraTo(p.pos, p.target, 900);
+      });
+    });
+  });
+    </script>
+
+    <!-- UI HTML -->
+    <div id="cam-ui" aria-label="Camera presets">
+  <button data-preset="BIGBEAR">BIGBEAR</button>
+  <button data-preset="top">TOPVIEW</button>
+  <button data-preset="Polar">POLAR</button>
+  <button data-preset="NAME">NAME</button>
+  <button data-preset="penguins">PENGUINS</button>
+</div>
+</body>
+</html>
